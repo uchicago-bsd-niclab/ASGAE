@@ -1,0 +1,16 @@
+fastapi
+pydantic
+uvicorn
+numpy
+matplotlib
+open3d
+simpleitk
+#pytorch3d
+scikit-learn
+scipy
+# torch
+# torch-geometric
+tqdm
+trimesh
+opencv-python
+vtk==9.4.1
