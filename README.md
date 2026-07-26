@@ -1,6 +1,6 @@
 # ASGAE: Adaptive Sampling Graph Autoencoder
 
-Official implementation of the **Adaptive Sampling Graph Autoencoder (ASGAE)**, introduced in our paper:
+Implementation of the **Adaptive Sampling Graph Autoencoder (ASGAE)**, introduced in our paper:
 
 > **Unsupervised Adaptive Sampling Graph Autoencoder for 3D Surface Encoding and Mesh Representation Transfer**
 > Ines A. Cruz-Guerrero, Joseph Nagel, Antonio R. Porras.
