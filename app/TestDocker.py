@@ -16,8 +16,7 @@ emb_dims = 512
 num_workers = 0
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
-datadir = '/mnt/d/OneDrive - The University of Colorado Denver/DataMeshCHCO4_25'
-# datadir = r'D:\OneDrive - The University of Colorado Denver\DataMeshCHCO4_25'
+datadir = '/path/to/your/data'
 files = [str(x) for x in Path(datadir).glob('*_meshHeadTexLand.pt')]
 
 trainDict={

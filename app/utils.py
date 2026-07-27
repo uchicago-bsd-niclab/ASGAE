@@ -108,7 +108,7 @@ def Run_Test(params):
     return {"status": "Testing done!"}
 
 class Params:
-        db_path = '/mnt/d/OneDrive - The University of Colorado Denver/DataMeshCHCO4_25'
+        db_path = '/path/to/your/data'
         batch_size = 6
         test_batch_size = 2
         k_order = 6

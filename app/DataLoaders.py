@@ -82,10 +82,10 @@ class LoadedDatasetCOMA(Dataset):
             self.pair = False
             # print("The dimensions in the input 1 and 2 are different, will process only with the first input")
         if self.normalize:
-            self.meanR= torch.load('/mnt/c/Users/cruzguea/Documents/DataMeshCOMA/mean_R.pt', weights_only=False)
-            self.stdR= torch.load('/mnt/c/Users/cruzguea/Documents/DataMeshCOMA/std_R.pt', weights_only=False)
-            self.meanT= torch.load('/mnt/c/Users/cruzguea/Documents/DataMeshCOMA/mean_T.pt', weights_only=False)
-            self.stdT= torch.load('/mnt/c/Users/cruzguea/Documents/DataMeshCOMA/std_T.pt', weights_only=False)
+            self.meanR= torch.load('/path/to/your/data/mean_R.pt', weights_only=False)
+            self.stdR= torch.load('/path/to/your/data/std_R.pt', weights_only=False)
+            self.meanT= torch.load('/path/to/your/data/mean_T.pt', weights_only=False)
+            self.stdT= torch.load('/path/to/your/data/std_T.pt', weights_only=False)
 
     def __getitem__(self, idx):
         if self.pair:
