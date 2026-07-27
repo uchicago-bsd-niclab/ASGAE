@@ -18,7 +18,7 @@ import open3d as o3d
 from scipy.spatial import cKDTree
 import copy
 
-# Part of the code is referred from: https://github.com/ClementPinard/SfmLearner-Pytorch/blob/master/inverse_warp.py
+
 def array2polydata(points):
     """
     Convierte un array de puntos (N, 3) en un objeto vtkPolyData.

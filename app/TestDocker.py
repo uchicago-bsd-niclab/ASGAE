@@ -1,3 +1,7 @@
+"""Minimal standalone example that trains ASGAE locally without the API.
+
+Edit ``datadir`` to point to the folder containing your ``.pt`` mesh files.
+"""
 import torch
 from ASGAE import AE
 import numpy as np
@@ -12,11 +16,11 @@ np.random.seed(seed)
 
 emb_dims = 512
 
-# dataloadi
+# Dataloading
 num_workers = 0
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
-datadir = '/path/to/your/data'
+datadir = '/data'  # directory containing the .pt mesh files
 files = [str(x) for x in Path(datadir).glob('*_meshHeadTexLand.pt')]
 
 trainDict={

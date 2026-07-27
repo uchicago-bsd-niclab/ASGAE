@@ -1,4 +1,3 @@
-
 from pathlib import Path
 import torch
 import numpy as np
@@ -13,7 +12,7 @@ def run_training(params):
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
 
-    # Config divice
+    # Configure device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
@@ -73,7 +72,7 @@ def Run_Test(params):
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
     
-    # Config divice
+    # Configure device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
@@ -108,10 +107,10 @@ def Run_Test(params):
     return {"status": "Testing done!"}
 
 class Params:
-        db_path = '/path/to/your/data'
-        batch_size = 6
+        db_path = '/data'  # directory containing the .pt mesh files
+        batch_size = 8
         test_batch_size = 2
-        k_order = 6
+        k_order = 4 
         embedding_dim = 512
         optimizer = 'adam'
         learning_rate = 0.001

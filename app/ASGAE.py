@@ -55,7 +55,7 @@ class RegistMesh(nn.Module):
             s = (torch.mean(torch.linalg.norm(BB, axis=2),dim=1) / (torch.mean(torch.linalg.norm(AA, axis=2),dim=1)+1e-8))
             R = s.unsqueeze(1).unsqueeze(2)*R
         
-        # Traslación
+        # Translation
         t = t_mean.transpose(2, 1) - R @ x_mean.transpose(2, 1) # [B, 3]
 
         # Build transformation matrix

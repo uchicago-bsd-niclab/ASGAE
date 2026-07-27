@@ -1,3 +1,9 @@
+"""Dataset and dataloader utilities for ASGAE.
+
+Defines the PyTorch Geometric ``Data`` subclass used to store surface meshes,
+the datasets that load them from ``.pt`` files (optionally applying random
+rigid augmentation), and a helper to build train/validation/test dataloaders.
+"""
 from torch_geometric.data.dataset import Dataset
 import numpy as np
 from pathlib import Path
@@ -8,6 +14,12 @@ import app.util as utl
 from torch_geometric.loader import DataLoader
 
 class MyData(Data):
+    """PyG ``Data`` subclass for surface meshes.
+
+    Overrides concatenation behavior so that the ``y`` field is stacked along a
+    new dimension (used to hold spherical maps) instead of being concatenated,
+    and reports a length of 1 (a single graph per object).
+    """
     def __cat_dim__(self, key, value, *args, **kwargs):
         #along y we want a new dimension to handle the spherical maps
         if key == 'y':
@@ -18,6 +30,13 @@ class MyData(Data):
         return 1
 
 class LoadedDataset(Dataset):
+    """Dataset that loads surface-mesh graphs from a list of ``.pt`` files.
+
+    Args:
+        filenames: list of paths to ``.pt`` files, each holding one graph.
+        transform: if True, apply a random rigid transformation on load.
+        translate: if True, also apply a random translation in the transform.
+    """
     def __init__(self, filenames,transform=False, translate=False):
         super().__init__()
         self.transform = transform
@@ -33,12 +52,13 @@ class LoadedDataset(Dataset):
             return self.load_file(self.filenames[idx])
 
     def load_file(self, filename):
-        # pdb.set_trace()
+        """Load a single graph from a ``.pt`` file path."""
         if type(filename) == str:
             data = torch.load(filename, weights_only=False)
         return data
     
     def get_MaxDist(self):
+        """Return the maximum vertex norm (distance to origin) across the dataset."""
         MaxDist = 0
         for i in range(len(self.filenames)):
             data1 = self.load_file(self.filenames[i])
@@ -54,7 +74,8 @@ class LoadedDataset(Dataset):
         return len(self.filenames)
     
     def applyTransform(self, data, translate=True):
-        # Apply a transformation to the data
+        """Apply a random rotation (and optional translation) to a graph's positions."""
+        # Apply a random rigid transformation to the data
         x = data.pos
         rad = 1/6
         R = utl.euler2rot(torch.Tensor(np.random.uniform(-rad,rad,3)*np.pi))
@@ -69,6 +90,18 @@ class LoadedDataset(Dataset):
     
 
 class LoadedDatasetCOMA(Dataset):
+    """Dataset loader for the COMA database.
+
+    Loads one or two parallel lists of ``.pt`` files. When both lists have the
+    same length the items are returned as pairs. Optionally normalizes features
+    using precomputed statistics and appends a dummy node.
+
+    Args:
+        filenames1: primary list of ``.pt`` file paths.
+        filenames2: optional second list, returned paired with ``filenames1``.
+        normalize: if True, standardize features using stored mean/std tensors.
+        dummy_node: if True, append an extra zero-valued node to each graph.
+    """
     def __init__(self, filenames1,filenames2=None, normalize=False, dummy_node= False):
         super().__init__()
         
@@ -80,12 +113,12 @@ class LoadedDatasetCOMA(Dataset):
             self.pair = True
         else:
             self.pair = False
-            # print("The dimensions in the input 1 and 2 are different, will process only with the first input")
+            # The two input lists differ in length; only the first input will be processed.
         if self.normalize:
-            self.meanR= torch.load('/path/to/your/data/mean_R.pt', weights_only=False)
-            self.stdR= torch.load('/path/to/your/data/std_R.pt', weights_only=False)
-            self.meanT= torch.load('/path/to/your/data/mean_T.pt', weights_only=False)
-            self.stdT= torch.load('/path/to/your/data/std_T.pt', weights_only=False)
+            self.meanR= torch.load('/mnt/c/Users/cruzguea/Documents/DataMeshCOMA/mean_R.pt', weights_only=False)
+            self.stdR= torch.load('/mnt/c/Users/cruzguea/Documents/DataMeshCOMA/std_R.pt', weights_only=False)
+            self.meanT= torch.load('/mnt/c/Users/cruzguea/Documents/DataMeshCOMA/mean_T.pt', weights_only=False)
+            self.stdT= torch.load('/mnt/c/Users/cruzguea/Documents/DataMeshCOMA/std_T.pt', weights_only=False)
 
     def __getitem__(self, idx):
         if self.pair:
@@ -115,6 +148,24 @@ class LoadedDatasetCOMA(Dataset):
     
     
 def GetDataLoaders(dataset, batch_size, batchtest=1, train_set_percentage=0.8, val_set_percentage=0.1, shuffle=False, num_workers=0, pin_memory=True):
+    """Split a dataset into train/validation/test sets and build dataloaders.
+
+    The split fractions are ``train_set_percentage``, ``val_set_percentage`` and
+    the remainder for the test set, using a fixed random seed for reproducibility.
+
+    Args:
+        dataset: dataset instance to split.
+        batch_size: batch size for the training loader.
+        batchtest: batch size for the validation and test loaders.
+        train_set_percentage: fraction of samples used for training.
+        val_set_percentage: fraction of samples used for validation.
+        shuffle: whether to shuffle the training loader.
+        num_workers: number of dataloader workers.
+        pin_memory: whether to pin memory in the dataloaders.
+
+    Returns:
+        tuple of (train_loader, val_loader, test_loader).
+    """
     train_data, val_data, test_data = torch.utils.data.random_split(dataset,[train_set_percentage,val_set_percentage,1-(train_set_percentage+val_set_percentage)], torch.Generator().manual_seed(42))
 
     train_loader = DataLoader(train_data, shuffle=shuffle, batch_size=batch_size, pin_memory=pin_memory)
