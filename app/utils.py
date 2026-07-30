@@ -1,3 +1,5 @@
+"""API-facing training and validation orchestration for ASGAE."""
+
 from pathlib import Path
 import torch
 import numpy as np
@@ -5,22 +7,33 @@ from app.ASGAE import AE
 
 
 def run_training(params):
-    # Seed Configuration
+    """Train ASGAE using an API parameter object.
+
+    Args:
+        params: Object exposing the fields defined by ``app.main.Params``.
+
+    Returns:
+        A JSON-serializable completion status.
+
+    Raises:
+        ValueError: If ``optimizer`` is neither ``adam`` nor ``sgd``.
+    """
+    # Configure deterministic random seeds.
     seed = 472
     torch.backends.cudnn.deterministic = True
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
 
-    # Configure device
+    # Select a CUDA device when one is available.
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # Find dataset files
+    # Discover serialized mesh graphs.
     datadir = params.db_path
     files = [str(x) for x in Path(datadir).glob('*.pt')]
 
-    # Config dictionary for training
+    # Build the dataloader configuration.
     trainDict = {
         'batch_size': max(2,params.batch_size),
         'test_batch_size': max(2, params.test_batch_size),
@@ -28,11 +41,11 @@ def run_training(params):
         'setSplit': [params.train_set_percentage, params.val_set_percentage, params.test_set_percentage]
     }
 
-    # Initialize network
-    net = AE(params.k_order, params.embedding_dim, bias=True, Dataset=files, trainDic=trainDict)
+    # Each documented graph provides RGB texture, giving 3 position + 3 color channels.
+    net = AE(6, params.embedding_dim, k_order=params.k_order, bias=True, Dataset=files, trainDic=trainDict)
     net.to(device)
 
-    # Optimizer configuration
+    # Construct the requested optimizer.
     if params.optimizer.lower() == "adam":
         optimizer = torch.optim.Adam(net.parameters(), lr=params.learning_rate)
     elif params.optimizer.lower() == "sgd":
@@ -40,7 +53,7 @@ def run_training(params):
     else:
         raise ValueError(f"Optimizer not supported: {params.optimizer}")
 
-    # Training loop
+    # Train with validation-based early stopping.
     loss_prev = float('inf')
     counter = 0
     for epoch in range(params.epochs):
@@ -65,22 +78,30 @@ def run_training(params):
     return {"status": "Training done!", "\tEpochs": params.epochs}
 
 def Run_Test(params):
-    # Seed Configuration
+    """Load a trained ASGAE model and evaluate it on the requested split.
+
+    Args:
+        params: Object exposing the fields defined by ``app.main.Params``.
+
+    Returns:
+        A JSON-serializable completion status.
+    """
+    # Configure deterministic random seeds.
     seed = 472
     torch.backends.cudnn.deterministic = True
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
     
-    # Configure device
+    # Select a CUDA device when one is available.
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # Find dataset files
+    # Discover serialized mesh graphs.
     datadir = params.db_path
     files = [str(x) for x in Path(datadir).glob('*.pt')]
 
-    # Config dictionary for testing
+    # Build the evaluation dataloader configuration.
     print("Preparing testing...")
     if params.full_test_dataset:
         print("Using full dataset for testing.")
@@ -94,19 +115,20 @@ def Run_Test(params):
         'setSplit': datasplit
     }
 
-    # Initialize network
-    net = AE(params.k_order, params.embedding_dim, bias=True, Dataset=files, trainDic=testDict)
+    # Each documented graph provides RGB texture, giving 3 position + 3 color channels.
+    net = AE(6, params.embedding_dim, k_order=params.k_order, bias=True, Dataset=files, trainDic=testDict)
     net.to(device)
 
-    # Load pre-trained model weights
-    net.load_state_dict(torch.load(params.model_path))
+    # Load model weights onto the device selected above.
+    net.load_state_dict(torch.load(params.model_path, map_location=device, weights_only=True))
 
     # Testing
-    net.Test_one_epoch(device)
+    net.Test_one_epoch(device, verbose=params.verbose, data_loader=net.test_loader)
 
     return {"status": "Testing done!"}
 
 class Params:
+        """Runnable local example configuration matching the FastAPI schema."""
         db_path = '/data'  # directory containing the .pt mesh files
         batch_size = 8
         test_batch_size = 2

@@ -84,7 +84,8 @@ The model expects each surface mesh to be stored as an individual **PyTorch Geom
  
 - `pos`: tensor of shape `[N, 3]` with the Euclidean coordinates of the `N` mesh vertices.
 - `edge_index`: tensor of shape `[2, E]` with the mesh connectivity (edges).
-- `x`: node feature tensor. The first three columns are the vertex normals and the remaining columns hold RGB texture (texture is normalized internally by its maximum).
+- `edge_weight`: tensor of shape `[E]` with one weight per edge (use ones when no edge-specific weighting is needed).
+- `x`: node-feature tensor of shape `[N, 6]`. The first three columns are vertex normals and columns 3–5 are RGB texture values. ASGAE uses the vertex coordinates plus the RGB columns as its six encoder input channels; texture is normalized internally by its maximum when exporting VTK meshes.
 All `.pt` files for a run must live in a single directory, which is passed to the API as `db_path`. The loader collects every matching `.pt` file in that folder and splits it into train/validation/test sets according to the requested percentages (with a fixed random seed for reproducibility).
  
 **Datasets used in the paper**
@@ -118,7 +119,7 @@ curl -X POST http://localhost:8000/train \
         "verbose": false
       }'
 ```
-Training uses the Adam (or SGD) optimizer and applies early stopping when the validation loss stops improving over five consecutive epochs. The best-performing weights are saved to `model_path`.
+Training uses the Adam (or SGD) optimizer and applies early stopping when the validation-loss change remains below `1e-5` for five consecutive epochs. The best-performing weights are saved to `model_path`. The parent directory of `model_path` must already exist.
  
 ### Validate / run inference
 ```bash
@@ -148,17 +149,27 @@ Set `full_test_dataset` to `true` to evaluate on the entire dataset; set it to `
 |-----------|-------------|
 | `db_path` | Directory (inside the container) with the `.pt` mesh files. |
 | `batch_size` / `test_batch_size` | Batch sizes for training and evaluation (minimum 2). |
-| `k_order` | Order of the Chebyshev polynomials (paper uses 4). |
+| `k_order` | Order of the Chebyshev polynomials used by every graph convolution (paper uses 4). |
 | `embedding_dim` | Latent dimensionality D_S (paper uses 512). |
 | `optimizer` | `adam` or `sgd`. |
 | `learning_rate` | Learning rate (paper uses 0.001). |
 | `epochs` | Maximum number of training epochs. |
-| `model_path` | Path where the trained weights are saved / loaded. |
-| `train/val/test_set_percentage` | Dataset split fractions. |
+| `model_path` | Existing writable path where trained weights are saved, or existing path from which weights are loaded. |
+| `train/val/test_set_percentage` | Dataset split fractions; the three values must sum to 1.0. |
 | `full_test_dataset` | If true, use the whole dataset for testing. |
 | `verbose` | Print per-batch progress. |
  
-Key hyperparameters used in the paper: learning rate = 0.001, Chebyshev polynomial order k = 4, latent dimension D_S = 512, template update rate alpha = 0.9.
+Key hyperparameters used in the paper: learning rate = 0.001, Chebyshev polynomial order k = 4, and latent dimension D_S = 512.
+
+### Local Python example
+
+For a quick local run (with the dependencies installed), edit `datadir` in `app/TestDocker.py` and run:
+
+```bash
+python -m app.TestDocker
+```
+
+The example uses all `*.pt` files in that directory, six input channels (coordinates plus RGB), a Chebyshev order of 4, and runs ten epochs.
  
 ---
  

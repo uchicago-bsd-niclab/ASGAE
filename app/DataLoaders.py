@@ -4,9 +4,7 @@ Defines the PyTorch Geometric ``Data`` subclass used to store surface meshes,
 the datasets that load them from ``.pt`` files (optionally applying random
 rigid augmentation), and a helper to build train/validation/test dataloaders.
 """
-from torch_geometric.data.dataset import Dataset
 import numpy as np
-from pathlib import Path
 from torch_geometric.data import Dataset
 from torch_geometric.data import Data
 import torch
@@ -21,12 +19,14 @@ class MyData(Data):
     and reports a length of 1 (a single graph per object).
     """
     def __cat_dim__(self, key, value, *args, **kwargs):
-        #along y we want a new dimension to handle the spherical maps
+        """Specify PyG batching dimensions, preserving per-graph ``y`` tensors."""
+        # Keep y on a new dimension to handle spherical maps.
         if key == 'y':
             return None
         else:
             return super().__cat_dim__(key, value, *args, **kwargs)
     def __len__(self):
+        """Report one graph per ``MyData`` instance."""
         return 1
 
 class LoadedDataset(Dataset):
@@ -44,6 +44,7 @@ class LoadedDataset(Dataset):
         self.filenames =filenames
 
     def __getitem__(self, idx):
+        """Load and optionally augment the graph at ``idx``."""
         if self.transform:
             data = self.load_file(self.filenames[idx])
             data = self.applyTransform(data, self.translate)
@@ -52,10 +53,15 @@ class LoadedDataset(Dataset):
             return self.load_file(self.filenames[idx])
 
     def load_file(self, filename):
-        """Load a single graph from a ``.pt`` file path."""
+        """Load a single PyG graph from a ``.pt`` file path.
+
+        Raises:
+            TypeError: If ``filename`` is not a string path.
+        """
         if type(filename) == str:
             data = torch.load(filename, weights_only=False)
-        return data
+            return data
+        raise TypeError("filename must be a string path.")
     
     def get_MaxDist(self):
         """Return the maximum vertex norm (distance to origin) across the dataset."""
@@ -68,9 +74,11 @@ class LoadedDataset(Dataset):
         return MaxDist
 
     def get(self):
-        pass
+        """PyG compatibility hook; indexing is implemented by ``__getitem__``."""
+        raise NotImplementedError("Use dataset[index] instead of get().")
                 
     def len(self):
+        """Return the number of serialized graphs."""
         return len(self.filenames)
     
     def applyTransform(self, data, translate=True):
@@ -109,7 +117,7 @@ class LoadedDatasetCOMA(Dataset):
         self.filenames2 =filenames2
         self.normalize =normalize
         self.dummy_node =dummy_node
-        if len(filenames1)==len(filenames2):
+        if filenames2 is not None and len(filenames1) == len(filenames2):
             self.pair = True
         else:
             self.pair = False
@@ -121,12 +129,14 @@ class LoadedDatasetCOMA(Dataset):
             self.stdT= torch.load('/mnt/c/Users/cruzguea/Documents/DataMeshCOMA/std_T.pt', weights_only=False)
 
     def __getitem__(self, idx):
+        """Load an item or a synchronized pair of COMA graphs."""
         if self.pair:
             return self.load_file(self.filenames1[idx]), self.load_file(self.filenames2[idx])
         else:
             return self.load_file(self.filenames1[idx])
         
     def load_file(self, filename):
+        """Load a COMA graph and apply configured normalization/node padding."""
         if type(filename) == str:
             data = torch.load(filename, weights_only=False)
             if self.normalize:
@@ -142,16 +152,18 @@ class LoadedDatasetCOMA(Dataset):
         return data
 
     def get(self):
-        pass
+        """PyG compatibility hook; indexing is implemented by ``__getitem__``."""
+        raise NotImplementedError("Use dataset[index] instead of get().")
     def len(self):
+        """Return the number of primary COMA graphs."""
         return len(self.filenames1)
     
     
-def GetDataLoaders(dataset, batch_size, batchtest=1, train_set_percentage=0.8, val_set_percentage=0.1, shuffle=False, num_workers=0, pin_memory=True):
+def GetDataLoaders(dataset, batch_size, batchtest=1, train_set_percentage=0.8, val_set_percentage=0.1, test_set_percentage=0.1, shuffle=False, num_workers=0, pin_memory=True):
     """Split a dataset into train/validation/test sets and build dataloaders.
 
     The split fractions are ``train_set_percentage``, ``val_set_percentage`` and
-    the remainder for the test set, using a fixed random seed for reproducibility.
+    and ``test_set_percentage``, using a fixed random seed for reproducibility.
 
     Args:
         dataset: dataset instance to split.
@@ -159,6 +171,8 @@ def GetDataLoaders(dataset, batch_size, batchtest=1, train_set_percentage=0.8, v
         batchtest: batch size for the validation and test loaders.
         train_set_percentage: fraction of samples used for training.
         val_set_percentage: fraction of samples used for validation.
+        test_set_percentage: fraction of samples used for testing. Fractions
+            must sum to one.
         shuffle: whether to shuffle the training loader.
         num_workers: number of dataloader workers.
         pin_memory: whether to pin memory in the dataloaders.
@@ -166,7 +180,14 @@ def GetDataLoaders(dataset, batch_size, batchtest=1, train_set_percentage=0.8, v
     Returns:
         tuple of (train_loader, val_loader, test_loader).
     """
-    train_data, val_data, test_data = torch.utils.data.random_split(dataset,[train_set_percentage,val_set_percentage,1-(train_set_percentage+val_set_percentage)], torch.Generator().manual_seed(42))
+    split_total = train_set_percentage + val_set_percentage + test_set_percentage
+    if not np.isclose(split_total, 1.0):
+        raise ValueError("train, validation, and test split fractions must sum to 1.0.")
+    train_data, val_data, test_data = torch.utils.data.random_split(
+        dataset,
+        [train_set_percentage, val_set_percentage, test_set_percentage],
+        torch.Generator().manual_seed(42),
+    )
 
     train_loader = DataLoader(train_data, shuffle=shuffle, batch_size=batch_size, pin_memory=pin_memory)
     val_loader = DataLoader(val_data, shuffle=False,  batch_size=batchtest, pin_memory=pin_memory)

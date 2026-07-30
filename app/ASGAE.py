@@ -1,3 +1,5 @@
+"""Neural-network components and training routines for the ASGAE model."""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -14,12 +16,23 @@ from tqdm import tqdm
         
 
 class RegistMesh(nn.Module):
+    """Estimate a batched rigid alignment to a running latent-point template."""
     def __init__(self, in_channel, bias=True):
         super(RegistMesh, self).__init__()
         self.in_channel = in_channel
         self.updateTemp = False
         
     def forward(self, x, scaling=False):
+        """Align latent coordinates and return one homogeneous transform per item.
+
+        Args:
+            x: Tensor of shape ``[B, 3, N]`` containing latent coordinates.
+            scaling: Whether to estimate a uniform scale in addition to rotation
+                and translation.
+
+        Returns:
+            Detached float32 transforms with shape ``[B, 4, 4]``.
+        """
         x=x.detach()
         B, C, N = x.shape
         x = x.permute(0, 2, 1)  # [B, N, 3]
@@ -79,6 +92,7 @@ class RegistMesh(nn.Module):
         return self.tmatrix.to(torch.float32).detach()
     
     def update_template(self, new_sample, alpha=0.1):
+        """Initialize or, when enabled, exponentially update the template."""
         if hasattr(self, 'mean') and self.updateTemp:
             vaux = self.mean.clone().detach()
             self.mean = alpha * new_sample.mean(0).detach() + (1 - alpha) * vaux.to(new_sample)
@@ -88,6 +102,7 @@ class RegistMesh(nn.Module):
 
 
 class ChebLayer(nn.Module):
+    """Chebyshev graph convolution followed by ReLU and configurable normalization."""
     def __init__(self, in_channels, out_channels, K = 4, bias=True):
         super(ChebLayer, self).__init__()
         self.in_channels = in_channels
@@ -99,6 +114,19 @@ class ChebLayer(nn.Module):
         self.relu = nn.ReLU()
         self.elu = nn.ELU()
     def forward(self, x, edge_index, edge_weight=None, batch=None, normMode='Graph'):
+        """Apply the convolution to node features.
+
+        Args:
+            x: Node-feature tensor.
+            edge_index: COO graph connectivity.
+            edge_weight: Optional edge weights; unit weights are used by default.
+            batch: Graph identifier for every node.
+            normMode: ``"Graph"`` for :class:`GraphNorm` or ``"Batch"`` for
+                batch normalization.
+
+        Returns:
+            Normalized, activated node features.
+        """
         if edge_weight is None:
             edge_weight = torch.ones(edge_index.size(1), device=x.device, dtype=x.dtype)
         x = self.chebconv(x, edge_index, edge_weight=edge_weight.to(torch.float32), batch=batch)
@@ -110,12 +138,13 @@ class ChebLayer(nn.Module):
         return x  # Return the output of the Chebyshev layer after activation and normalization
 
 class GraphEncoder(nn.Module):
-    def __init__(self, in_channels, latent_size, drop_prob=0.1, bias=True):
+    """Encode a graph into a fixed-size set of latent surface descriptors."""
+    def __init__(self, in_channels, latent_size, k_order=4, drop_prob=0.1, bias=True):
         super(GraphEncoder, self).__init__()
         self.in_channel = in_channels
         self.latent_size = latent_size
         hidden_features = self.latent_size
-        Ks = 4
+        Ks = k_order
         self.R = tog.nn.Sequential('x, edge_index, edge_weight, batch', [
             (BatchNorm(in_channels), 'x -> x'),
             (ChebLayer(in_channels, hidden_features // 16, K=Ks, bias=bias), 'x, edge_index, edge_weight, batch -> x'),
@@ -124,7 +153,18 @@ class GraphEncoder(nn.Module):
             (ChebLayer(hidden_features // 4, hidden_features // 2, K=Ks, bias=bias), 'x, edge_index, edge_weight, batch -> x'),
         ])
         self.Rlin = Linear(hidden_features // 2, hidden_features, bias=bias)
-    def forward(self, src, eval=False):         
+    def forward(self, src, eval=False):
+        """Encode a batched mesh graph.
+
+        Args:
+            src: PyG batch with ``pos``, ``x``, ``edge_index``, ``edge_weight``,
+                and ``batch`` attributes.
+            eval: Disable random pose augmentation when true.
+
+        Returns:
+            A tuple of dense latent descriptors, their validity mask, augmented
+            node inputs, and encoder features.
+        """
         position, features, batch, edge_indices, edge_weights = src.pos, src.x, src.batch, src.edge_index, src.edge_weight
         # edge_indices, edge_weights = remove_self_loops(edge_indices, edge_weights)
         if not eval:
@@ -166,33 +206,55 @@ class GraphEncoder(nn.Module):
         return L, mask, x_input1, m_input2#, kl_mean
     
 class GraphDecoder(nn.Module):
-    def __init__(self, in_channels, latent_size, drop_prob=0.1, bias=True):
+    """Predict dense interpolation weights from encoded graph features."""
+    def __init__(self, in_channels, latent_size, k_order=4, drop_prob=0.1, bias=True):
         super(GraphDecoder, self).__init__()
         self.in_channel = in_channels
         self.latent_size = latent_size
         hidden_features = self.latent_size
-        Ks = 4
+        Ks = k_order
         self.M = tog.nn.Sequential('x, edge_index, edge_weight, batch', [
             (ChebLayer(hidden_features // 2, hidden_features // 2, K=Ks, bias=bias), 'x, edge_index, edge_weight, batch -> x'),
             (Linear(hidden_features // 2, hidden_features, bias=bias), 'x -> x'),
             (nn.Softmax(dim=1), 'x -> x')
         ])
-    def forward(self, src, x_input):         
+    def forward(self, src, x_input):
+        """Return padded per-node decoder weights for ``src``."""
         MInv= self.M(x_input, src.edge_index, src.edge_weight, src.batch)
         M = to_dense_batch(MInv, src.batch)[0]
         return M
 
 
 class AE(nn.Module):
-    def __init__(self, in_channels, latent_size, bias=True, drop_prob= 0.7, Dataset=None, trainDic={}):
+    """Adaptive Sampling Graph Autoencoder.
+
+    The model expects ``pos`` coordinates plus the texture channels after the
+    first three columns of ``x``. For the documented RGB data this produces six
+    input channels: three coordinates and three texture values.
+    """
+    def __init__(self, in_channels, latent_size, k_order=4, bias=True, drop_prob=0.7, Dataset=None, trainDic=None):
+        """Initialize ASGAE and its dataset splits.
+
+        Args:
+            in_channels: Number of encoder input channels (six for RGB meshes).
+            latent_size: Number of latent descriptors.
+            k_order: Chebyshev polynomial order used by graph convolutions.
+            bias: Whether linear and convolutional layers use biases.
+            drop_prob: Retained for API compatibility; no dropout is applied.
+            Dataset: Paths to serialized PyG mesh graphs.
+            trainDic: Loader settings with ``batch_size``, ``test_batch_size``,
+                ``shuffle``, and ``setSplit`` entries.
+        """
         super(AE, self).__init__()
+        if trainDic is None:
+            raise ValueError("trainDic must provide dataloader settings.")
         self.in_channels=in_channels
         self.latent_size = latent_size
-        self.Encoder = GraphEncoder(self.in_channels, self.latent_size, drop_prob=drop_prob,bias=bias)
-        self.Decoder = GraphDecoder(self.in_channels, self.latent_size, drop_prob=drop_prob,bias=bias)
+        self.Encoder = GraphEncoder(self.in_channels, self.latent_size, k_order=k_order, drop_prob=drop_prob,bias=bias)
+        self.Decoder = GraphDecoder(self.in_channels, self.latent_size, k_order=k_order, drop_prob=drop_prob,bias=bias)
         
         self.Outcoord = tog.nn.Sequential('x, edge_index, edge_weight, batch', [
-            (ChebLayer(latent_size+in_channels, int(latent_size), K=4, bias=bias), 'x, edge_index, edge_weight, batch -> x'),
+            (ChebLayer(latent_size+in_channels, int(latent_size), K=k_order, bias=bias), 'x, edge_index, edge_weight, batch -> x'),
             (Linear(int(latent_size), int(latent_size),bias=bias), 'x -> x'),
             (nn.Tanh(), 'x -> x')
         ])
@@ -201,9 +263,21 @@ class AE(nn.Module):
         self.scalCoord = 0.0001
         
         dataset = LoadedDataset(Dataset,[])
-        self.train_loader, self.val_loader, self.test_loader = GetDataLoaders(dataset, shuffle=trainDic['shuffle'], batch_size=trainDic['batch_size'], batchtest=trainDic['test_batch_size'],train_set_percentage=trainDic['setSplit'][0], val_set_percentage=trainDic['setSplit'][1])
+        self.train_loader, self.val_loader, self.test_loader = GetDataLoaders(
+            dataset, shuffle=trainDic['shuffle'], batch_size=trainDic['batch_size'],
+            batchtest=trainDic['test_batch_size'], train_set_percentage=trainDic['setSplit'][0],
+            val_set_percentage=trainDic['setSplit'][1], test_set_percentage=trainDic['setSplit'][2],
+        )
 
     def forward(self, target):
+        """Reconstruct a training batch with random pose augmentation.
+
+        Args:
+            target: Batched PyG mesh graph.
+
+        Returns:
+            Tuple of reconstructed node values and original node values.
+        """
         # target = MyData(x=x, pos=pos, edge_index=edge_index, edge_weight=edge_weight, batch=batch)
         self.trg=target.clone()
         del target
@@ -223,6 +297,7 @@ class AE(nn.Module):
         return self.Out, self.U
     
     def evaluate(self, target):
+        """Reconstruct a batch without random pose augmentation."""
         # target = MyData(x=x, pos=pos, edge_index=edge_index, edge_weight=edge_weight, batch=batch)
         self.trg=target.clone()
         del target
@@ -241,6 +316,7 @@ class AE(nn.Module):
         return self.Out, self.U
     
     def ObtainOutput(self, L0, M, mask, target):
+        """Interpolate latent descriptors back to the nodes of ``target``."""
         xLOini = M@L0
         if not M.size(0) == 1:
             xLOini[~mask] = 0
@@ -254,6 +330,7 @@ class AE(nn.Module):
         return Out
       
     def save_mesh(self, folderName, epoch, save_src=False):
+        """Write reconstructed meshes, latent points, and template to disk."""
         if not os.path.exists(folderName):
             os.makedirs(folderName)
         target = copy.deepcopy(self.trg)
@@ -287,6 +364,7 @@ class AE(nn.Module):
         
     
     def transfer(self, src, trg, epoch, fileName):
+        """Transfer each surface representation onto the other's topology."""
         source = copy.deepcopy(src)
         target = copy.deepcopy(trg)
         del src, trg
@@ -343,6 +421,7 @@ class AE(nn.Module):
         del source, target, xRO, xLT
         
     def lossChamfer(self):
+        """Compute cyclic cross-item Chamfer losses for the current batch."""
         batchSize = self.trg.num_graphs
         shiftedIndex = (torch.arange(batchSize) + 1)%batchSize
         shiftedBatch = tog.data.Batch.from_data_list(self.trg[shiftedIndex])
@@ -368,6 +447,7 @@ class AE(nn.Module):
             
 
     def loss(self, type_loss='Full', verbose=False):
+        """Compute the selected reconstruction, latent, and transfer objective."""
         U =to_dense_batch(self.U, self.trg.batch)[0]
         if type_loss=='Full':
             loss_coord = self.criterion(self.U[:,:3], self.Out[:,:3])
@@ -480,6 +560,7 @@ class AE(nn.Module):
 
 
     def Train_one_epoch(self, optimizer, device, type_loss='Full', verbose=False):
+        """Optimize the model over one training epoch and return mean loss."""
         self.train()
         total_loss = 0
         mse_coord = 0
@@ -521,7 +602,18 @@ class AE(nn.Module):
                     mse_color * 1.0 / num_examples, mae_color * 1.0 / num_examples))
         return total_loss * 1.0 / num_examples
 
-    def Test_one_epoch(self, device, type_loss='Full', verbose=False):
+    def Test_one_epoch(self, device, type_loss='Full', verbose=False, data_loader=None):
+        """Evaluate a loader (validation by default) and return its mean loss.
+
+        Args:
+            device: Device on which to evaluate the model.
+            type_loss: Objective variant accepted by :meth:`loss`.
+            verbose: Whether to print loss components.
+            data_loader: Optional loader; defaults to the validation split.
+
+        Raises:
+            ValueError: If the selected loader contains no examples.
+        """
         self.eval()
         total_loss = 0
         mse_coord = 0
@@ -530,7 +622,7 @@ class AE(nn.Module):
         mae_color = 0
         num_examples = 0
         with torch.no_grad():
-            for data in tqdm(self.val_loader):
+            for data in tqdm(self.val_loader if data_loader is None else data_loader):
                 batch_size = len(data)
                 num_examples += batch_size
                 data = data.to(device)
@@ -555,6 +647,8 @@ class AE(nn.Module):
                 del data, output, U
                 torch.cuda.empty_cache()
         
+        if num_examples == 0:
+            raise ValueError("The selected evaluation loader contains no examples.")
         print('==VAL==')
         print('Loss: %f || MSE: %f, MAE: %f  || Texture --> MSE: %f, MAE: %f'
                         % (total_loss * 1.0 / num_examples, mse_coord * 1.0 / num_examples, mae_coord * 1.0 / num_examples, \

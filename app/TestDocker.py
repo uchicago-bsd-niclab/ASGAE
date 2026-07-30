@@ -1,9 +1,10 @@
-"""Minimal standalone example that trains ASGAE locally without the API.
+"""Minimal standalone ASGAE training example.
 
-Edit ``datadir`` to point to the folder containing your ``.pt`` mesh files.
+Run it from the repository root with ``python -m app.TestDocker`` after
+changing ``datadir`` to a directory of compatible ``.pt`` mesh graphs.
 """
 import torch
-from ASGAE import AE
+from app.ASGAE import AE
 import numpy as np
 from pathlib import Path
 from os import path
@@ -20,8 +21,8 @@ emb_dims = 512
 num_workers = 0
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
-datadir = '/data'  # directory containing the .pt mesh files
-files = [str(x) for x in Path(datadir).glob('*_meshHeadTexLand.pt')]
+datadir = '/data'  # Directory containing compatible .pt mesh graphs.
+files = [str(x) for x in Path(datadir).glob('*.pt')]
 
 trainDict={
     'batch_size': 4,
@@ -29,7 +30,7 @@ trainDict={
     'shuffle': True,
     'setSplit': [0.8, 0.1, 0.1]
 }
-net = AE(6,emb_dims, bias=True, Dataset=files, trainDic=trainDict)
+net = AE(6, emb_dims, k_order=4, bias=True, Dataset=files, trainDic=trainDict)
 net.to(device)
 
 optimizer = torch.optim.Adam(net.parameters(), lr=0.001)

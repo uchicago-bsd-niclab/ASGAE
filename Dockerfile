@@ -1,10 +1,10 @@
-# Imagen base con PyTorch 2.7.1, CUDA 12.6 y cuDNN9
+# Base image with PyTorch 2.2.1 and CUDA 11.8.
 FROM gwangjin/pytorch3d:torch2.2.1-cuda11.8
 
-# Establecer directorio de trabajo
+# Set the working directory.
 WORKDIR /app
 
-# Copiar archivos del proyecto
+# Copy project files.
 COPY . /app
 
 RUN apt-get update -y \
@@ -42,7 +42,7 @@ RUN apt-get update -y \
 	libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
-# Instalar dependencias
+# Install Python dependencies.
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
 RUN pip install fvcore iopath
@@ -53,7 +53,7 @@ RUN pip install torch_geometric
 RUN pip install fvcore iopath ninja
 #RUN pip install torch_scatter torch_sparse torch_cluster torch_spline_conv -f https://data.pyg.org/whl/torch-2.2.1+cu118.html
 
-# 🔹 Solución clave:
+# Optional PyTorch3D installation alternative:
 #RUN pip install "git+https://github.com/facebookresearch/pytorch3d.git@stable" --no-build-isolation
 
 #RUN git clone https://github.com/facebookresearch/pytorch3d.git && cd pytorch3d && pip install -e . --no-build-isolation

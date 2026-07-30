@@ -1,3 +1,4 @@
+"""FastAPI application exposing ASGAE training and validation endpoints."""
 
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -7,7 +8,7 @@ import sys, os
 # Docker image with PyTorch3D installed:
 # https://hub.docker.com/r/gwangjin/pytorch3d
 #
-# Add /app and /app/app to sys.path
+# Add application directories to the import path.
 sys.path.append("/app")
 sys.path.append("/app/app")
 
@@ -19,9 +20,15 @@ app = FastAPI()
 
 @app.get("/")
 def read_root():
+    """Return a minimal health-check response."""
     return {"status": "ok"}
 
 class Params(BaseModel):
+    """Validated request body shared by training and validation endpoints.
+
+    ``k_order`` controls the Chebyshev polynomial order. The input-channel
+    count is inferred from the documented RGB mesh format.
+    """
     db_path: str
     batch_size: int
     test_batch_size: int
@@ -39,16 +46,19 @@ class Params(BaseModel):
 
 @app.post("/train")
 async def train(params: Params):
+    """Train a model using the supplied dataset and hyperparameters."""
     print("Training started with parameters:", params)
-    print("Taining start....")
+    print("Training started.")
     result = run_training(params)
     return result
 
 @app.post("/validate")
 async def validate(params: Params):
+    """Evaluate a saved model using the supplied dataset and split settings."""
     result = Run_Test(params)
     return result
 
 @app.get("/gpu")
 def check_gpu():
+    """Report whether PyTorch can use CUDA in the running container."""
     return {"gpu_available": torch.cuda.is_available()}

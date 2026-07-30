@@ -1,3 +1,5 @@
+"""Geometry, mesh conversion, visualization, and evaluation helpers for ASGAE."""
+
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
@@ -21,29 +23,30 @@ import copy
 
 def array2polydata(points):
     """
-    Convierte un array de puntos (N, 3) en un objeto vtkPolyData.
+    Convert an ``(N, 3)`` point array to a ``vtkPolyData`` object.
 
-    Parámetros:
-    - points: np.ndarray de tamaño (N, 3) con coordenadas (x, y, z).
+    Args:
+        points: ``(N, 3)`` array of ``(x, y, z)`` coordinates.
 
-    Retorna:
-    - polydata: objeto vtkPolyData con los puntos.
+    Returns:
+        ``vtkPolyData`` containing the input points.
     """
-    # Verificar que la entrada sea un array numpy
+    # Ensure that the input is a NumPy array.
     points = np.asarray(points)
 
-    # Crear un vtkPoints y agregar los puntos
+    # Create vtkPoints and add the coordinates.
     vtk_points = vtk.vtkPoints()
     for p in points:
         vtk_points.InsertNextPoint(p[0], p[1], p[2])
 
-    # Crear un vtkPolyData y asignar los puntos
+    # Create vtkPolyData and assign its points.
     polydata = vtk.vtkPolyData()
     polydata.SetPoints(vtk_points)
 
     return polydata
 
 def quat2mat(quat):
+    """Convert a batch of ``(x, y, z, w)`` quaternions to rotation matrices."""
     x, y, z, w = quat[:, 0], quat[:, 1], quat[:, 2], quat[:, 3]
 
     B = quat.size(0)
@@ -57,7 +60,7 @@ def quat2mat(quat):
                           2*xz - 2*wy, 2*wx + 2*yz, w2 - x2 - y2 + z2], dim=1).reshape(B, 3, 3)
     return rotMat
 
-def euler2quat(e, order=3):
+def euler2quat(e, order='xyz'):
     """
     Convert Euler angles to quaternions.
     """
@@ -104,6 +107,7 @@ def euler2quat(e, order=3):
     return result.reshape(original_shape)
 
 def qmul_np(q, r):
+    """Multiply NumPy quaternion arrays by delegating to the Torch implementation."""
     q = torch.from_numpy(q).contiguous()
     r = torch.from_numpy(r).contiguous()
     return qmul(q, r).numpy()
@@ -129,6 +133,7 @@ def qmul(q, r):
     return torch.stack((w, x, y, z), dim=1).view(original_shape)
 
 def transform_point_cloud(point_cloud, rotation, translation):
+    """Apply batched quaternion/matrix rotations and translations to points."""
     if len(rotation.size()) == 2:
         rot_mat = quat2mat(rotation)
     else:
@@ -136,6 +141,7 @@ def transform_point_cloud(point_cloud, rotation, translation):
     return torch.matmul(rot_mat, point_cloud) + translation.unsqueeze(2)
 
 def ApplyTransformPC(pc, mask, rttn, trns, scl=None):
+    """Apply per-item rotation and translation to valid padded point-cloud rows."""
     
     outPC = torch.zeros(pc.shape).to(pc)
     for x in range(pc.shape[0]):
@@ -145,6 +151,7 @@ def ApplyTransformPC(pc, mask, rttn, trns, scl=None):
     return outPC
 
 def npmat2euler(mats, seq='xyz'):
+    """Convert NumPy rotation matrices to Euler angles in degrees."""
     eulers = []
     # for i in range(mats.shape[0]):
     for i in range(len(mats)):
@@ -152,10 +159,12 @@ def npmat2euler(mats, seq='xyz'):
         eulers.append(r.as_euler(seq, degrees=True))
     return np.asarray(eulers, dtype='float32')
 def error_rotmat_angles(mat_pred, mat_gt, seq='xyz'):
+    """Return relative Euler-angle errors between predicted and target rotations."""
     # mat_diff = np.matmul(mat_pred, mat_gt.T)
     return npmat2euler(np.matmul(mat_pred, mat_gt.transpose((0,2,1))))
 
 def error_euler_angles(mat_pred,eulers_gt, seq='xyz'):
+    """Return relative Euler-angle errors against ground-truth Euler angles."""
     mat_diff = []
     for i in range(mat_pred.shape[0]):
         r_pred =  mat_pred[i]
@@ -176,13 +185,15 @@ def fit_in_m1_to_1(points):
     return points
 
 def get_transformations(igt):
-	R_ba = igt[:, 0:3, 0:3]								# Ps = R_ba * Pt
-	translation_ba = igt[:, 0:3, 3].unsqueeze(2)		# Ps = Pt + t_ba
-	R_ab = R_ba.permute(0, 2, 1)						# Pt = R_ab * Ps
-	translation_ab = -torch.bmm(R_ab, translation_ba)	# Pt = Ps + t_ab
-	return R_ab, translation_ab, R_ba, translation_ba
+    """Return forward and inverse rotations/translations from homogeneous matrices."""
+    R_ba = igt[:, 0:3, 0:3]  # Ps = R_ba * Pt
+    translation_ba = igt[:, 0:3, 3].unsqueeze(2)  # Ps = Pt + t_ba
+    R_ab = R_ba.permute(0, 2, 1)  # Pt = R_ab * Ps
+    translation_ab = -torch.bmm(R_ab, translation_ba)  # Pt = Ps + t_ab
+    return R_ab, translation_ab, R_ba, translation_ba
 
 def batched_pairwise_dist(a, b):
+    """Compute squared pairwise distances for two batched point sets."""
     x, y = a.double(), b.double()
     bs, num_points_x, points_dim = x.size()
     bs, num_points_y, points_dim = y.size()
@@ -246,6 +257,7 @@ def farthest_point_sample(xyz, npoint):
     return centroids
 
 def euler2rot(x):
+    """Convert batched XYZ Euler angles in radians to rotation matrices."""
 
     B = x.size(0)
     
@@ -282,6 +294,7 @@ def euler2rot(x):
     return R
 
 def plotPCbatch(pcArray1, pcArray2, pcArray3, show = True, save = False, name=None, fig_count=4 , sizex = 5, sizey=10):
+    """Plot up to ``fig_count`` corresponding point clouds in three rows."""
     
     pc1 = pcArray1[0:fig_count]
     pc2 = pcArray2[0:fig_count]
@@ -319,7 +332,8 @@ def plotPCbatch(pcArray1, pcArray2, pcArray3, show = True, save = False, name=No
     else:
         return fig
 def ApplyTransform(data, transform):
-    # Creating a copy of the input meshes
+    """Return a transformed copy of a VTK mesh with recomputed normals."""
+    # Create a copy of the input mesh.
     a = vtk.vtkPolyData()
     a.DeepCopy(data)
     data = a
@@ -328,7 +342,7 @@ def ApplyTransform(data, transform):
         coords = np.array(data.GetPoint(p))
         newCoords = transform.TransformPoint(coords.astype(np.float64))
         data.GetPoints().SetPoint(p, newCoords[0], newCoords[1], newCoords[2])
-    # Recalculating the normals and saving
+    # Recompute normals.
     filter = vtk.vtkPolyDataNormals()
     filter.SetInputData(data)
     filter.ComputeCellNormalsOff()
@@ -340,6 +354,7 @@ def ApplyTransform(data, transform):
     data = filter.GetOutput()
     return data
 def ReadPolyData(filename):
+    """Read a legacy ``.vtk`` or XML VTK polydata file."""
     if filename.endswith('.vtk'):
         reader = vtk.vtkPolyDataReader()
     else:
@@ -349,11 +364,12 @@ def ReadPolyData(filename):
     return reader.GetOutput()
 
 def WritePolyData(data, filename):
+    """Write polydata to a VTK file selected by the filename extension."""
     if filename.endswith('.vtk'):
         writer = vtk.vtkPolyDataWriter()
     else:
         writer = vtk.vtkXMLPolyDataWriter()
-    # Saving landmarks
+    # Serialize the polydata.
     writer = vtk.vtkXMLPolyDataWriter()
     writer.SetFileName(filename)
     writer.SetInputData(data)
@@ -361,7 +377,8 @@ def WritePolyData(data, filename):
     return
 
 def ApplyTransform2Mesh(meshName,R, t, s=[]):
-    basedirs = 'D:\OneDrive - The University of Colorado Denver\FinalModelingData'
+    """Apply an affine transform to a mesh in the legacy local dataset layout."""
+    basedirs = r'D:\OneDrive - The University of Colorado Denver\FinalModelingData'
     mesh = ReadPolyData(path.join(basedirs,str(meshName),'ExternalHeadSurface-updated.vtp'))
     rigid_euler = sitk.AffineTransform(3)
     rigid_euler.SetTranslation(t[:,0].T.astype(float))
@@ -373,6 +390,7 @@ def ApplyTransform2Mesh(meshName,R, t, s=[]):
     WritePolyData(mesh, path.join('meshResults',meshName)+'.vtp')
     
 def AddTransformGraph(dataset, angle = 0, translation = 1):
+    """Create randomly transformed graph copies and retain their transforms."""
     rad = np.pi / 180 * angle
     R = euler2rot(torch.Tensor(np.random.uniform(-rad,rad,3*len(dataset))*np.pi).reshape(len(dataset),3))
     trns = torch.Tensor(np.random.uniform(-translation,translation,3*len(dataset)).reshape(len(dataset),3))
@@ -385,7 +403,10 @@ def AddTransformGraph(dataset, angle = 0, translation = 1):
     return Data
 
 def applyTransformGraphPos(pos, batch, scale=True):
-    # Apply a transformation to the data
+    """Randomly transform a flattened batched point tensor.
+
+    Returns transformed points and batched homogeneous transform matrices.
+    """
     x, mask = tog.utils.to_dense_batch(pos, batch)
     rad = 1/9
     R = euler2rot(torch.Tensor(np.random.uniform(-rad,rad,3*x.size(0))*np.pi).reshape(x.size(0),3)).to(x)
@@ -413,25 +434,25 @@ def applyTransformGraphPos(pos, batch, scale=True):
 
 def inverse_transform(transform, scale=True):
     """
-    Aplica la transformación inversa de una matriz homogénea 4x4 a una nube de puntos.
+    Compute the inverse of batched homogeneous 4x4 transforms.
 
     Args:
-        coord (torch.Tensor): [B, N, 3] Nube de puntos.
-        transform (torch.Tensor): [B, 4, 4] Matriz de transformación homogénea.
+        transform: Homogeneous transforms with shape ``[B, 4, 4]``.
+        scale: Whether the 3x3 blocks contain a uniform scale.
 
     Returns:
-        torch.Tensor: [B, N, 3] Nube de puntos transformada inversamente.
+        Inverse transforms with shape ``[B, 4, 4]``.
     """
     B = transform.shape[0]
 
-    # Extraer rotación y traslación
+    # Extract rotation/scale and translation.
     R_s = transform[:, :3, :3]  # [B, 3, 3]
     t = transform[:, :3, 3:]  # [B, 3, 1]
 
-    # Calcular inversa
+    # Compute the inverse.
     if scale:
         scale = torch.linalg.norm(R_s, dim=1).mean(dim=1, keepdim=True)  # [B, 1]
-        scale = scale.clamp(min=1e-8)  # evitar división por cero
+        scale = scale.clamp(min=1e-8)  # Avoid division by zero.
         R = R_s / scale.view(B, 1, 1)
     else:
         scale = torch.ones(B, 1, device=transform.device, dtype=transform.dtype)
@@ -440,16 +461,16 @@ def inverse_transform(transform, scale=True):
     R_inv = R.transpose(1, 2)/scale.view(B,1,1)  # R^T
     t_inv = -torch.bmm(R_inv, t)  # -R^T * t
 
-    # Construir matriz homogénea inversa
+    # Build the inverse homogeneous matrix.
     inv_transform = torch.eye(4, device=transform.device, dtype=transform.dtype).unsqueeze(0).repeat(B, 1, 1)
     inv_transform[:, :3, :3] = R_inv
     inv_transform[:, :3, 3] = t_inv.squeeze(-1)
 
-    # Aplicar inversa
     return inv_transform
 
 def ApplyTransform2Mesh(meshName,R, t, s=[], args=None):
-    basedirs = 'D:\OneDrive - The University of Colorado Denver\FinalModelingData'
+    """Apply an affine transform to a mesh in the legacy local dataset layout."""
+    basedirs = r'D:\OneDrive - The University of Colorado Denver\FinalModelingData'
     mesh = ReadPolyData(path.join(basedirs,str(meshName),'ExternalHeadSurface-updated.vtp'))
     rigid_euler = sitk.AffineTransform(3)
     rigid_euler.SetTranslation(t.T.astype(float))
@@ -485,21 +506,23 @@ def from_dense_batch(dense_bath, mask):
     data_x = flatten_dense_batch[flatten_mask, :]
     num_nodes = torch.sum(mask, dim=1)  # B, like 3,4,3
     pr_value = torch.cumsum(num_nodes, dim=0)  # B, like 3,7,10
-    indicator_vector = torch.zeros(torch.sum(num_nodes, dim=0))
+    indicator_vector = torch.zeros(
+        torch.sum(num_nodes, dim=0), device=dense_bath.device, dtype=torch.long
+    )
     indicator_vector[pr_value[:-1]] = 1  # num_of_nodes, 0,0,0,1,0,0,0,1,0,0,1
     data_batch = torch.cumsum(indicator_vector, dim=0)  # num_of_nodes, 0,0,0,1,1,1,1,1,2,2,2
     return data_x, data_batch
 
 def apply_transform(coord, transform):
     """
-    Aplica una transformación rígida 4x4 a una nube de puntos.
+    Apply batched homogeneous 4x4 transforms to a point cloud.
 
     Args:
-        coord (torch.Tensor): [B, N, 3] Nube de puntos (batch).
-        transform (torch.Tensor): [B, 4, 4] Matriz de transformación homogénea por batch.
+        coord: Point clouds with shape ``[B, N, 3]``.
+        transform: Homogeneous transforms with shape ``[B, 4, 4]``.
 
     Returns:
-        torch.Tensor: [B, N, 3] Nube transformada.
+        Transformed point clouds with shape ``[B, N, 3]``.
     """
     B, N, _ = coord.shape
     coord_h = torch.cat([coord, torch.ones(B, N, 1, device=coord.device)], dim=2)  # [B, N, 4]
@@ -507,6 +530,7 @@ def apply_transform(coord, transform):
     return coord_transf[:, :, :3]  
 
 def plot_PC(pc_trg, mask_trg, output=None, mask_src = None):
+    """Display target clouds, optionally overlaid with output clouds in Open3D."""
     if output!=None and mask_src != None:
         for i in range(len(pc_trg)):
             pcd1 = o3d.geometry.PointCloud()
@@ -522,19 +546,16 @@ def plot_PC(pc_trg, mask_trg, output=None, mask_src = None):
             create_pcd_obj(pc_trg[i,mask_trg[i]].detach().cpu().numpy(), [1, 0.5, 0])
 
 def create_pcd_obj(np_array,col=[1,0,0]):
-	'''
-	input: nx3 array
-	output: pcd object 
-			can be displayed using o3d.visualization.draw_geometries([pcd1,pcd2])
-	'''
+    """Create an Open3D point cloud from an ``(N, 3)`` array and RGB color."""
 
-	pcd = o3d.geometry.PointCloud()
-	pcd.points = o3d.utility.Vector3dVector(np_array[:,0:3])
-	pcd.paint_uniform_color(col)
-	return pcd
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(np_array[:, 0:3])
+    pcd.paint_uniform_color(col)
+    return pcd
 
 def transformPC2Mesh(PC, graph):
-    # Creating a mesh from the pc input
+    """Construct a triangulated VTK mesh from graph connectivity and points."""
+    # Create a mesh from input points.
     graph.edge_index = tog.utils.remove_self_loops(graph.edge_index)[0]
     points = vtk.vtkPoints()
     for i, (x, y, z) in enumerate(PC):
@@ -581,6 +602,7 @@ def transformPC2Mesh(PC, graph):
     return mesh
 
 def GenerateMesh(data):
+    """Convert a PyG graph with coordinates, normals, and texture to VTK mesh."""
     
     if hasattr(data, 'pos') and hasattr(data, 'x') and data.x.size(1) > 3:
         data.edge_index = tog.utils.remove_self_loops(data.edge_index)[0]
@@ -663,7 +685,8 @@ def GenerateMesh(data):
     return polyData
 
 def ComputePointToSurfaceError(polydata, points):
-    # Create a vtkImplicitPolyDataDistance object
+    """Return unsigned distances from points to a VTK surface."""
+    # Create a VTK implicit-distance evaluator.
     implicit_distance = vtk.vtkImplicitPolyDataDistance()
     implicit_distance.SetInput(polydata)
     
@@ -675,6 +698,7 @@ def ComputePointToSurfaceError(polydata, points):
     return np.abs(distances)
 
 class Normalize(object):
+    """Apply feature-wise normalization to a PyG graph's ``x`` and ``y`` values."""
     def __init__(self, mean=None, std=None):
         self.mean = mean
         self.std = std
@@ -688,6 +712,7 @@ class Normalize(object):
         return data
 
 def compute_pointwise_distances(mesh1, mesh2):
+    """Return pointwise or nearest-neighbor distances between two VTK meshes."""
     points1 = mesh1.GetPoints()
     points2 = mesh2.GetPoints()
     distances = np.zeros(points1.GetNumberOfPoints())
@@ -707,6 +732,7 @@ def compute_pointwise_distances(mesh1, mesh2):
     return distances
 
 def add_distance_scalar_to_mesh(mesh, distances, textureDist=None,name="TextureError"):
+    """Attach geometric and optional texture-error arrays to VTK point data."""
     vtk_distances = vtk.vtkFloatArray()
     vtk_distances.SetName("DistanceError")
     vtk_distances.SetNumberOfValues(len(distances))
@@ -729,28 +755,29 @@ def add_distance_scalar_to_mesh(mesh, distances, textureDist=None,name="TextureE
     return mesh
 
 def project_texture_error(reference_polydata, predicted_polydata, texture_array_name="Texture"):
-    # Asegúrate de que el array de textura está en la malla de referencia
+    """Project a reference texture array onto a predicted VTK mesh."""
+    # Ensure the texture array exists on the reference mesh.
     if reference_polydata.GetPointData().GetArray('Texture') is None:
         raise ValueError(f"Array '{texture_array_name}' not found in reference mesh.")
 
-    # Crear el filtro de proyección
+    # Create the projection filter.
     probe = vtk.vtkProbeFilter()
-    probe.SetSourceData(reference_polydata)  # Malla con el valor que queremos proyectar
-    probe.SetInputData(predicted_polydata)   # Malla donde queremos proyectar esos valores
+    probe.SetSourceData(reference_polydata)  # Mesh containing the source values.
+    probe.SetInputData(predicted_polydata)   # Mesh receiving projected values.
     probe.Update()
 
-    # Obtener los datos proyectados
+    # Retrieve projected data.
     output = probe.GetOutput()
     projected_array = output.GetPointData().GetArray(texture_array_name)
     
     if projected_array is None:
         raise RuntimeError("No projection was made, possibly due to unmatched geometry.")
 
-    # Convertir a NumPy para análisis si se desea
+    # Convert to NumPy for analysis.
     import numpy as np
     projected_errors = np.array([projected_array.GetTuple1(i) for i in range(projected_array.GetNumberOfTuples())])
 
-    return projected_errors  # Podrías también hacer np.mean(...) aquí si necesitas un resumen
+    return projected_errors  # A summary statistic can be computed by the caller.
 
 
 
@@ -792,44 +819,50 @@ def compute_chamfer_distances_mesh(mesh1, mesh2, textureDist=False):
 
 def batch_correlation(A, B, batch, eps=1e-8):
     """
-    Calcula la correlación de Pearson entre dos tensores A y B de tamaño [bs, N, 512].
+    Compute the mean Pearson correlation loss for two batched feature tensors.
 
     Args:
-        A (torch.Tensor): Tensor de tamaño [bs, N, 512]
-        B (torch.Tensor): Tensor de tamaño [bs, N, 512]
-        eps (float): Para evitar división por cero
+        A: First flattened feature tensor.
+        B: Second flattened feature tensor.
+        batch: Graph identifier for each row.
+        eps: Numerical stability constant.
 
     Returns:
-        torch.Tensor: Correlación promedio por batch, tamaño [bs]
+        Scalar ``1 - mean_correlation``.
     """
-    # Centrado de cada vector en la dimensión N
+    # Center every feature vector over its graph's nodes.
     A_mean = tog.utils.scatter(A, batch, dim=0, reduce='mean')[batch]  # [bs, 1, 512]
     B_mean = tog.utils.scatter(B, batch, dim=0, reduce='mean')[batch]  # [bs, 1, 512]
     
     A_centered = A - A_mean
     B_centered = B - B_mean
 
-    # Numerador: suma de productos punto entre vectores centrados
+    # Numerator: centered dot-product sums.
     numerator = tog.utils.scatter((A_centered * B_centered), batch, dim=0, reduce='sum')  # [bs, 512]
     # numerator = tog.utils.scatter((A_centered * B_centered).sum(dim=1), batch, dim=0, reduce='sum')
 
-    # Denominador: norma de cada vector (en dimensión N)
+    # Denominator: feature-vector norms over nodes.
     A_norm = tog.utils.scatter(A_centered.pow(2), batch, dim=0, reduce='sum').sqrt()
     B_norm = tog.utils.scatter(B_centered.pow(2), batch, dim=0, reduce='sum').sqrt()
 
-    denominator = (A_norm * B_norm) + eps  # evitar división por cero
+    denominator = (A_norm * B_norm) + eps  # Avoid division by zero.
 
     correlation = numerator / denominator  # [bs, 512]
 
-    # Promedio sobre dimensión de características
+    # Average over feature dimensions.
     return 1-correlation.mean()
 
 
 def point_to_surface_metric(target, source_points, fileName='Errors', saveData=True, texture=None, returnMesh=False):
-        """
-        Estimates the point-to-surface metric between transferred source and target meshes.
-        Uses the transferred graphs from the transfer function.
-        Returns the average minimum distance from each point in the transferred source to the surface of the transferred target.
+        """Measure mean distance from points to a graph-derived target surface.
+
+        Args:
+            target: PyG graph used to build the reference surface.
+            source_points: ``(N, 3)`` points to evaluate.
+            fileName: Prefix for optional VTK output.
+            saveData: Write the target mesh when true.
+            texture: Optional pointwise texture-error array to attach to output.
+            returnMesh: Return the generated target mesh with the metric.
         """
         
         target_copy = copy.deepcopy(target)
@@ -857,10 +890,10 @@ def metrics_for_ASGAE(graph_GT, estimated_points, texture=None):
     """
     Computes metrics for ASGAE model evaluation.
     Args:
-        graph (torch_geometric.data.Data): Input graph with ground truth points in graph.y.
+        graph_GT: Input graph with ground-truth coordinates in ``pos`` or ``x``.
         estimated_points (torch.Tensor): Estimated points of shape [N, 3].
     Returns:
-        dict: Dictionary containing MSE, RMSE, MAE, and Chamfer distance.
+        Dictionary containing distance, MAE, Chamfer, and point-to-surface metrics.
     """
     if 'pos' in graph_GT.keys():
         gt_points = graph_GT.pos.cpu().numpy()
@@ -869,17 +902,17 @@ def metrics_for_ASGAE(graph_GT, estimated_points, texture=None):
         gt_points = graph_GT.x.cpu().numpy()
     est_points = estimated_points.cpu().numpy()
 
-    # Mean Squared Error
+    # Mean pointwise Euclidean distance.
     if gt_points.shape[0] == estimated_points.shape[0]:
         distances = np.mean(np.linalg.norm(gt_points - est_points, axis=1))
 
-        # Mean Absolute Error
+        # Mean absolute coordinate error.
         mae = np.mean(np.abs(gt_points - est_points))
     else:
         distances = 0
         mae = 0
 
-    # Chamfer Distance
+    # Symmetric Chamfer distance.
     tree_gt = cKDTree(gt_points)
     tree_est = cKDTree(est_points)
 
@@ -914,7 +947,7 @@ import vtk
 from vtk.util.numpy_support import vtk_to_numpy
 
 def barycentric_weights(p, a, b, c):
-    """Calcula pesos baricéntricos de un punto p respecto a triángulo (a,b,c)."""
+    """Compute barycentric weights of point ``p`` in triangle ``(a, b, c)``."""
     v0 = b - a
     v1 = c - a
     v2 = p - a
@@ -925,7 +958,7 @@ def barycentric_weights(p, a, b, c):
     d21 = np.dot(v2, v1)
     denom = d00 * d11 - d01 * d01
     if denom == 0:
-        # Triángulo degenerado: asigna todo el peso al vértice más cercano
+        # Degenerate triangle: assign all weight to the closest vertex.
         dists = [np.linalg.norm(p - a), np.linalg.norm(p - b), np.linalg.norm(p - c)]
         w = np.zeros(3)
         w[np.argmin(dists)] = 1.0
@@ -936,31 +969,36 @@ def barycentric_weights(p, a, b, c):
     return np.array([u, v, w])
 
 def ComputePointToSurfaceTextureError(mesh, query_points, est_textures, metric="RMSE"):
-    """
-    Calcula el error entre texturas predichas (est_textures) y la textura
-    almacenada en el array 'Texture' de PointData del mesh.
+    """Compare estimated textures with barycentrically interpolated surface values.
 
-    mesh          : vtkPolyData con PointData["Texture"]
-    query_points  : (N,3) ndarray
-    est_textures  : (N,) o (N,C) ndarray (predicciones)
-    metric        : 'L1' | 'L2' | 'MAE' | 'RMSE'
+    Args:
+        mesh: ``vtkPolyData`` with a ``Texture`` point-data array.
+        query_points: ``(N, 3)`` coordinates to project to the surface.
+        est_textures: ``(N,)`` or ``(N, C)`` estimated texture values.
+        metric: ``"L1"``/``"MAE"`` or ``"L2"``/``"MSE"`` pointwise metric.
+
+    Returns:
+        Per-point errors, summary values, and interpolated surface values.
+
+    Raises:
+        ValueError: If texture components or metric are unsupported.
     """
     query_points = np.asarray(query_points, dtype=float)
 
-    # Aseguramos que la malla esté triangulada
+    # Ensure that the mesh is triangulated.
     tri = vtk.vtkTriangleFilter()
     tri.SetInputData(mesh)
     tri.Update()
     mesh = tri.GetOutput()
 
-    # Extraemos la textura de los vértices
+    # Extract vertex texture values.
     tex_vtk = mesh.GetPointData().GetArray("Texture")
     if tex_vtk is None:
-        raise ValueError("El mesh no contiene un array 'Texture' en PointData.")
+        raise ValueError("The mesh does not contain a 'Texture' PointData array.")
     tex = vtk_to_numpy(tex_vtk).astype(float)
     ncomp = tex_vtk.GetNumberOfComponents()
 
-    # Locator para búsqueda de punto más cercano
+    # Locator for closest-point queries.
     locator = vtk.vtkStaticCellLocator()
     locator.SetDataSet(mesh)
     locator.BuildLocator()
@@ -979,28 +1017,28 @@ def ComputePointToSurfaceTextureError(mesh, query_points, est_textures, metric="
         cell = mesh.GetCell(int(cid))
         ids = cell.GetPointIds()
 
-        # Coordenadas de los vértices
+        # Vertex coordinates.
         v0 = np.array(vtk_points.GetPoint(ids.GetId(0)))
         v1 = np.array(vtk_points.GetPoint(ids.GetId(1)))
         v2 = np.array(vtk_points.GetPoint(ids.GetId(2)))
 
-        # Pesos baricéntricos
+        # Barycentric weights.
         w = barycentric_weights(np.array(cp), v0, v1, v2)
 
-        # Interpolamos la textura
+        # Interpolate texture values.
         t0 = tex[ids.GetId(0)]
         t1 = tex[ids.GetId(1)]
         t2 = tex[ids.GetId(2)]
         surf_tex[i, :] = w[0]*t0 + w[1]*t1 + w[2]*t2
 
-    # Normalizamos est_textures a 2D
+    # Normalize estimated textures to two dimensions.
     est = np.asarray(est_textures, dtype=float)
     if est.ndim == 1 and ncomp == 1:
         est = est[:, None]
     elif est.ndim == 1 and ncomp > 1:
-        raise ValueError(f"Las predicciones son escalares pero la textura de la superficie tiene {ncomp} componentes.")
+        raise ValueError(f"Predictions are scalar but the surface texture has {ncomp} components.")
     elif est.ndim == 2 and est.shape[1] != ncomp:
-        raise ValueError(f"Número de componentes incompatible: {est.shape[1]} vs {ncomp}.")
+        raise ValueError(f"Incompatible component count: {est.shape[1]} vs {ncomp}.")
 
     diff = est - surf_tex
     if ncomp == 1:
@@ -1010,13 +1048,13 @@ def ComputePointToSurfaceTextureError(mesh, query_points, est_textures, metric="
         per_point_L1 = np.linalg.norm(diff, ord=1, axis=1)
         per_point_L2 = np.linalg.norm(diff, ord=2, axis=1)
 
-    # Selección de métrica
+    # Select the requested metric.
     if metric.upper() in ("L1", "MAE"):
         per_point_error = per_point_L1
     elif metric.upper() in ("L2", "MSE"):
         per_point_error = per_point_L2
     else:
-        raise ValueError("Métrica no soportada.")
+        raise ValueError("Unsupported metric.")
 
     mae = float(np.mean(per_point_L1))
     mse = float(np.mean(per_point_L2))
@@ -1036,15 +1074,17 @@ import csv
 from datetime import datetime
 
 def save_raw_metric_lists(args, out_prefix="metrics", keys=None):
-    """
-    Guarda las listas crudas de args en:
-      - {out_prefix}.npz  (dict de arrays)
-      - {out_prefix}.json (dict de listas)
-      - {out_prefix}_long.csv (dos columnas: metric,value)
+    """Write selected metric sequences as NPZ, JSON, and long-format CSV.
 
-    Soporta longitudes distintas entre listas.
+    Args:
+        args: Object holding metric sequences as attributes.
+        out_prefix: Output path prefix, without an extension.
+        keys: Attribute names to export. Must not be empty.
+
+    Raises:
+        ValueError: If none of ``keys`` are present on ``args``.
     """
-    # Define aquí las claves que quieres extraer
+    # Define the attribute names to extract.
     # keys = [
     #     "mse_coord_epoch",
     #     "mae_coord_epoch",
@@ -1056,31 +1096,31 @@ def save_raw_metric_lists(args, out_prefix="metrics", keys=None):
     #     "distP2STexBA",
     # ]
 
-    # Recolecta listas desde args (si falta alguna, la ignora con aviso)
+    # Collect lists from args; warn and skip missing attributes.
     data = {}
     for k in keys:
         if hasattr(args, k):
             arr = np.asarray(getattr(args, k))
-            # Fuerza a 1D si es posible (por si viniera con shape (N,1))
+            # Flatten ``(N, 1)`` arrays when possible.
             if arr.ndim > 1 and arr.shape[1] == 1:
                 arr = arr.ravel()
-            data[k] = arr.astype(float)  # uniformiza a float
+            data[k] = arr.astype(float)  # Use a consistent numeric type.
         else:
-            print(f"[warn] args no tiene el atributo '{k}', se omitirá.")
+            print(f"[warn] args has no '{k}' attribute; it will be skipped.")
 
     if not data:
-        raise ValueError("No se encontró ninguna de las listas especificadas en 'args'.")
+        raise ValueError("None of the requested metric lists were found on args.")
 
-    # 1) Guardar NPZ (sin pérdida, recomendado para NumPy)
+    # 1) Write lossless NPZ (recommended for NumPy).
     npz_path = f"{out_prefix}.npz"
     np.savez_compressed(npz_path, **data)
 
-    # 2) Guardar JSON (legible)
+    # 2) Write readable JSON.
     json_path = f"{out_prefix}.json"
     with open(json_path, "w") as f:
         json.dump({k: v.tolist() for k, v in data.items()}, f, indent=2)
 
-    # 3) Guardar CSV en formato 'long' (metric,value)
+    # 3) Write long-format CSV (metric, value).
     csv_path = f"{out_prefix}_long.csv"
     with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
@@ -1089,24 +1129,25 @@ def save_raw_metric_lists(args, out_prefix="metrics", keys=None):
             for val in v:
                 writer.writerow([k, float(val)])
 
-    # (Opcional) Log cortito
+    # Concise optional log.
     total_values = sum(len(v) for v in data.values())
-    print(f"Guardado:")
+    print("Saved:")
     print(f" - NPZ : {npz_path}")
     print(f" - JSON: {json_path}")
-    print(f" - CSV : {csv_path}  (total filas={total_values})")
+    print(f" - CSV : {csv_path}  (total rows={total_values})")
 
-# ==== Ejemplo de uso ====
+# ==== Usage example ====
 # save_raw_metric_lists(args, out_prefix="exp42_metrics")
 def SaveLandmarks(landmarks, path, returnPoints=False):
-    # Crear estructura de puntos
+    """Write landmark coordinates, and optional RGB texture, to XML VTK polydata."""
+    # Create point structure.
     landmarksPoints = vtk.vtkPolyData()
     points = vtk.vtkPoints()
     for p in range(landmarks.shape[0]):
         points.InsertNextPoint(landmarks[p, :3])
     landmarksPoints.SetPoints(points)
 
-    # Si hay textura, agregarla antes de escribir
+    # If texture is provided, attach it before writing.
     if landmarks.shape[1] == 6:
         textures = landmarks[:, 3:6]
         textureArray = vtk.vtkFloatArray()
@@ -1116,27 +1157,32 @@ def SaveLandmarks(landmarks, path, returnPoints=False):
             textureArray.InsertNextTuple3(*textures[i])
         landmarksPoints.GetPointData().AddArray(textureArray)
 
-    # Escribir archivo
+    # Write the file.
     writer = vtk.vtkXMLPolyDataWriter()
     writer.SetFileName(path)
     writer.SetInputData(landmarksPoints)
-    writer.Write()  # Usar Write() en lugar de Update()
+    writer.Write()  # ``Write`` serializes; ``Update`` does not.
 
     if returnPoints:
         return landmarksPoints
     
 
 def ensure_triangles(poly):
+    """Return a triangulated copy of a VTK polydata object."""
     tri = vtk.vtkTriangleFilter()
     tri.SetInputData(poly)
     tri.Update()
     return tri.GetOutput()
 
 def project_points_to_surface_closest(polydata_surface, points_np):
-    """
-    polydata_surface: vtkPolyData (superficie)
-    points_np: np.ndarray de shape (N, 3) con puntos a proyectar
-    return: np.ndarray (N, 3) con puntos proyectados en la superficie
+    """Project points to their closest locations on a VTK surface.
+
+    Args:
+        polydata_surface: Reference ``vtkPolyData`` surface.
+        points_np: ``(N, 3)`` coordinates to project.
+
+    Returns:
+        ``(N, 3)`` projected coordinates.
     """
     surface = ensure_triangles(polydata_surface)
 
@@ -1146,7 +1192,7 @@ def project_points_to_surface_closest(polydata_surface, points_np):
 
     projected = np.empty_like(points_np, dtype=float)
 
-    # Buffers para la búsqueda
+    # Buffers used by closest-point queries.
     closest = [0.0, 0.0, 0.0]
     cellId = vtk.reference(0)
     subId = vtk.reference(0)
